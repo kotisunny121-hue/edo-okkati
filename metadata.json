@@ -1,0 +1,6 @@
+{
+  "name": "Emergency Resource Sharing System",
+  "description": "Full-stack, multi-role emergency resource coordination platform connecting verified providers, seekers, NGOs, volunteers, and administrators with real-time inventory and mapping.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
