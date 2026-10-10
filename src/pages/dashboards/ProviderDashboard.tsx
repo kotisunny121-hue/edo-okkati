@@ -42,6 +42,90 @@ export const ProviderDashboard: React.FC = () => {
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
   const [stockEditQty, setStockEditQty] = useState<number>(0);
 
+  // Full Resource Edit Modal state
+  const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
+  const [resourceToEdit, setResourceToEdit] = useState<Resource | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editCategory, setEditCategory] = useState<ResourceCategory>('food');
+  const [editDescription, setEditDescription] = useState('');
+  const [editQuantityAvailable, setEditQuantityAvailable] = useState<number>(0);
+  const [editUnit, setEditUnit] = useState('units');
+  const [editCondition, setEditCondition] = useState<'new' | 'good' | 'perishable'>('new');
+  const [editLocationName, setEditLocationName] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editLat, setEditLat] = useState<number>(37.7749);
+  const [editLng, setEditLng] = useState<number>(-122.4194);
+  const [editAvailabilityStatus, setEditAvailabilityStatus] = useState<string>('available');
+  const [savingEdit, setSavingEdit] = useState<boolean>(false);
+
+  // Custom in-app modal states for deletion, rejection, fulfillment
+  const [deleteConfirmRes, setDeleteConfirmRes] = useState<Resource | null>(null);
+  const [deletingResource, setDeletingResource] = useState<boolean>(false);
+  const [rejectModalReq, setRejectModalReq] = useState<ResourceRequest | null>(null);
+  const [rejectReasonInput, setRejectReasonInput] = useState<string>('Currently unavailable');
+  const [rejectingRequest, setRejectingRequest] = useState<boolean>(false);
+  const [fulfillModalReq, setFulfillModalReq] = useState<ResourceRequest | null>(null);
+  const [fulfillingRequest, setFulfillingRequest] = useState<boolean>(false);
+
+  const openEditModal = (res: Resource) => {
+    setResourceToEdit(res);
+    setEditTitle(res.title);
+    setEditCategory(res.category);
+    setEditDescription(res.description);
+    setEditQuantityAvailable(res.quantityAvailable);
+    setEditUnit(res.unit);
+    setEditCondition(res.condition);
+    setEditLocationName(res.locationName);
+    setEditAddress(res.address);
+    setEditLat(res.coordinates?.lat || 37.7749);
+    setEditLng(res.coordinates?.lng || -122.4194);
+    setEditAvailabilityStatus(res.availabilityStatus);
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEditResource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resourceToEdit) return;
+    try {
+      setSavingEdit(true);
+      setActionError(null);
+      await api.put(`/resources/${resourceToEdit._id}`, {
+        title: editTitle,
+        category: editCategory,
+        description: editDescription,
+        quantityAvailable: editQuantityAvailable,
+        unit: editUnit,
+        condition: editCondition,
+        locationName: editLocationName,
+        address: editAddress,
+        coordinates: { lat: editLat, lng: editLng },
+        availabilityStatus: editAvailabilityStatus,
+      });
+
+      setActionSuccess(`Resource "${editTitle}" updated successfully in MongoDB.`);
+      setEditModalOpen(false);
+      setResourceToEdit(null);
+      fetchData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to update resource');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleChangeAvailability = async (resourceId: string, newStatus: string) => {
+    try {
+      setActionError(null);
+      await api.patch(`/resources/${resourceId}/availability`, {
+        availabilityStatus: newStatus,
+      });
+      setActionSuccess(`Availability status updated to '${newStatus}'.`);
+      fetchData();
+    } catch (err: any) {
+      setActionError(err.message || 'Failed to update availability');
+    }
+  };
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -112,14 +196,19 @@ export const ProviderDashboard: React.FC = () => {
     }
   };
 
-  const handleDeleteResource = async (resourceId: string) => {
-    if (!window.confirm('Are you sure you want to remove this resource listing?')) return;
+  const handleConfirmDeleteResource = async () => {
+    if (!deleteConfirmRes) return;
     try {
-      await api.delete(`/resources/${resourceId}`);
-      setActionSuccess('Listing deleted.');
+      setDeletingResource(true);
+      setActionError(null);
+      await api.delete(`/resources/${deleteConfirmRes._id}`);
+      setActionSuccess(`Listing "${deleteConfirmRes.title}" successfully removed.`);
+      setDeleteConfirmRes(null);
       fetchData();
     } catch (err: any) {
       setActionError(err.message || 'Failed to delete listing');
+    } finally {
+      setDeletingResource(false);
     }
   };
 
@@ -135,30 +224,39 @@ export const ProviderDashboard: React.FC = () => {
     }
   };
 
-  const handleRejectRequest = async (requestId: string) => {
-    const reason = window.prompt('Optional rejection reason for seeker:', 'Currently unavailable');
-    if (reason === null) return;
+  const handleConfirmRejectRequest = async () => {
+    if (!rejectModalReq) return;
     try {
-      await api.post(`/requests/${requestId}/reject`, {
-        rejectionReason: reason,
+      setRejectingRequest(true);
+      setActionError(null);
+      await api.post(`/requests/${rejectModalReq._id}/reject`, {
+        rejectionReason: rejectReasonInput.trim() || 'Currently unavailable',
       });
       setActionSuccess('Request marked as rejected.');
+      setRejectModalReq(null);
       fetchData();
     } catch (err: any) {
       setActionError(err.message || 'Failed to reject request');
+    } finally {
+      setRejectingRequest(false);
     }
   };
 
-  const handleFulfillRequest = async (requestId: string) => {
-    if (!window.confirm('Confirm that this requested supply batch was physically handed over to seeker?')) return;
+  const handleConfirmFulfillRequest = async () => {
+    if (!fulfillModalReq) return;
     try {
-      await api.post(`/requests/${requestId}/fulfill`, {
+      setFulfillingRequest(true);
+      setActionError(null);
+      await api.post(`/requests/${fulfillModalReq._id}/fulfill`, {
         note: 'Confirmed handover at provider distribution depot',
       });
       setActionSuccess('Request marked as fulfilled and reserved stock finalized.');
+      setFulfillModalReq(null);
       fetchData();
     } catch (err: any) {
       setActionError(err.message || 'Failed to fulfill request');
+    } finally {
+      setFulfillingRequest(false);
     }
   };
 
@@ -357,15 +455,35 @@ export const ProviderDashboard: React.FC = () => {
                         {res.quantityReserved} {res.unit}
                       </td>
                       <td className="py-3 px-4">
-                        <StatusBadge status={res.availabilityStatus} />
+                        <div className="flex flex-col gap-1">
+                          <StatusBadge status={res.availabilityStatus} />
+                          <select
+                            value={res.availabilityStatus}
+                            onChange={(e) => handleChangeAvailability(res._id, e.target.value)}
+                            className="text-[10px] border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-700 focus:outline-none"
+                            title="Quick update availability"
+                          >
+                            <option value="available">Available</option>
+                            <option value="partially_available">Partial Stock</option>
+                            <option value="reserved">Reserved</option>
+                            <option value="unavailable">Unavailable</option>
+                          </select>
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-slate-600">
                         <span className="block truncate max-w-[140px]">{res.locationName}</span>
                       </td>
-                      <td className="py-3 px-4 text-right space-x-2">
+                      <td className="py-3 px-4 text-right space-x-1">
                         <button
-                          onClick={() => handleDeleteResource(res._id)}
-                          className="p-1 text-slate-400 hover:text-rose-600"
+                          onClick={() => openEditModal(res)}
+                          className="p-1 text-slate-500 hover:text-orange-600 inline-flex items-center"
+                          title="Edit Full Resource Details"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmRes(res)}
+                          className="p-1 text-slate-400 hover:text-rose-600 inline-flex items-center"
                           title="Delete Listing"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -456,7 +574,10 @@ export const ProviderDashboard: React.FC = () => {
                               Approve
                             </button>
                             <button
-                              onClick={() => handleRejectRequest(req._id)}
+                              onClick={() => {
+                                setRejectModalReq(req);
+                                setRejectReasonInput('Currently unavailable');
+                              }}
                               className="px-2 py-1 border border-slate-300 text-slate-600 hover:bg-slate-50 rounded text-[11px]"
                             >
                               Reject
@@ -466,7 +587,7 @@ export const ProviderDashboard: React.FC = () => {
 
                         {req.status === 'approved' && (
                           <button
-                            onClick={() => handleFulfillRequest(req._id)}
+                            onClick={() => setFulfillModalReq(req)}
                             className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-semibold"
                           >
                             Mark Fulfilled
@@ -669,6 +790,315 @@ export const ProviderDashboard: React.FC = () => {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* EDIT RESOURCE MODAL */}
+      {editModalOpen && resourceToEdit && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-xl w-full p-6 shadow-xl border border-slate-200 relative text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <span className="text-[10px] font-mono uppercase font-semibold text-orange-600">
+                  Update Supply Record
+                </span>
+                <h3 className="text-base font-bold text-slate-900">
+                  Edit Resource: {resourceToEdit.title}
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setEditModalOpen(false);
+                  setResourceToEdit(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditResource} className="space-y-4">
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">
+                  Resource Title <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Category</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none bg-white"
+                  >
+                    <option value="food">Food Packets</option>
+                    <option value="water">Drinking Water</option>
+                    <option value="first_aid">First Aid Kits</option>
+                    <option value="medicine">Essential Medicine</option>
+                    <option value="clothing">Clothing & Blankets</option>
+                    <option value="shelter">Shelter & Tents</option>
+                    <option value="hygiene">Hygiene Kits</option>
+                    <option value="rescue">Rescue Equipment</option>
+                    <option value="other">Other Emergency Supplies</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Condition</label>
+                  <select
+                    value={editCondition}
+                    onChange={(e) => setEditCondition(e.target.value as any)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none bg-white"
+                  >
+                    <option value="new">Brand New / Sealed</option>
+                    <option value="good">Good Condition</option>
+                    <option value="perishable">Perishable</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">
+                    Available Stock <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editQuantityAvailable}
+                    onChange={(e) => setEditQuantityAvailable(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Unit</label>
+                  <input
+                    type="text"
+                    value={editUnit}
+                    onChange={(e) => setEditUnit(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Status</label>
+                  <select
+                    value={editAvailabilityStatus}
+                    onChange={(e) => setEditAvailabilityStatus(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none bg-white"
+                  >
+                    <option value="available">Available</option>
+                    <option value="partially_available">Partial Stock</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="unavailable">Unavailable</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 mb-1">Description</label>
+                <textarea
+                  rows={2}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Depot / Location Name</label>
+                  <input
+                    type="text"
+                    value={editLocationName}
+                    onChange={(e) => setEditLocationName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 mb-1">Address</label>
+                  <input
+                    type="text"
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 p-2 bg-slate-50 rounded border border-slate-100">
+                <div>
+                  <label className="block font-medium text-slate-600 mb-1">Latitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={editLat}
+                    onChange={(e) => setEditLat(parseFloat(e.target.value) || 0)}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded bg-white font-mono text-xs"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-600 mb-1">Longitude</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={editLng}
+                    onChange={(e) => setEditLng(parseFloat(e.target.value) || 0)}
+                    className="w-full px-2 py-1.5 border border-slate-300 rounded bg-white font-mono text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditModalOpen(false);
+                    setResourceToEdit(null);
+                  }}
+                  className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="px-4 py-1.5 bg-orange-600 hover:bg-orange-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+                >
+                  {savingEdit ? 'Saving Changes...' : 'Save Changes to MongoDB'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL: DELETE RESOURCE CONFIRMATION */}
+      {deleteConfirmRes && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Confirm Deletion</h3>
+                <p className="text-slate-500 text-[11px]">This action permanently removes the record from MongoDB.</p>
+              </div>
+            </div>
+            <p className="text-slate-600 mb-4 bg-slate-50 p-3 rounded border border-slate-200">
+              Are you sure you want to permanently delete <strong className="text-slate-900">"{deleteConfirmRes.title}"</strong> ({deleteConfirmRes.quantityAvailable} {deleteConfirmRes.unit} available)?
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmRes(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingResource}
+                onClick={handleConfirmDeleteResource}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {deletingResource ? 'Deleting...' : 'Delete Resource'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REJECT REQUEST */}
+      {rejectModalReq && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <h3 className="text-sm font-bold text-slate-900 mb-1">Decline Emergency Request</h3>
+            <p className="text-slate-500 text-[11px] mb-3">
+              Provide a reason to notify the seeker why this request cannot be fulfilled at this depot.
+            </p>
+            <div className="mb-4">
+              <label className="block font-medium text-slate-700 mb-1">Rejection Reason</label>
+              <textarea
+                rows={3}
+                value={rejectReasonInput}
+                onChange={(e) => setRejectReasonInput(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+                placeholder="e.g. Stock exhausted, damaged in transit, or reserved for critical triage"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectModalReq(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={rejectingRequest}
+                onClick={handleConfirmRejectRequest}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {rejectingRequest ? 'Declining...' : 'Decline Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM FULFILL HANDOVER */}
+      {fulfillModalReq && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-blue-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                <CheckCircle className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Confirm Physical Handover</h3>
+                <p className="text-slate-500 text-[11px]">Finalize release of reserved supplies to seeker.</p>
+              </div>
+            </div>
+            <p className="text-slate-600 mb-4 bg-slate-50 p-3 rounded border border-slate-200">
+              Confirm that {fulfillModalReq.approvedQuantity || fulfillModalReq.requestedQuantity} units have been verified and transferred to{' '}
+              <strong className="text-slate-900">{fulfillModalReq.seekerId?.name || 'seeker'}</strong>.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFulfillModalReq(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={fulfillingRequest}
+                onClick={handleConfirmFulfillRequest}
+                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {fulfillingRequest ? 'Processing...' : 'Confirm Handover & Fulfill'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

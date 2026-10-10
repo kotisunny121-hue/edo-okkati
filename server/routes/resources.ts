@@ -1,4 +1,5 @@
 import express, { Response } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Resource, AvailabilityStatus } from '../models/Resource.js';
 import { ResourceRequest } from '../models/ResourceRequest.js';
@@ -12,7 +13,7 @@ const resourceCreateSchema = z.object({
   title: z.string().min(3).max(120),
   category: z.enum(['food', 'water', 'medicine', 'first_aid', 'clothing', 'shelter', 'hygiene', 'rescue', 'other']),
   description: z.string().min(5).max(2000),
-  quantityAvailable: z.number().min(1, 'Quantity must be at least 1'),
+  quantityAvailable: z.number().min(0, 'Quantity cannot be negative'),
   unit: z.string().min(1).max(30),
   condition: z.enum(['new', 'good', 'perishable']).default('new'),
   expiryDate: z.string().optional().nullable(),
@@ -25,14 +26,14 @@ const resourceCreateSchema = z.object({
   imageUrl: z.string().optional(),
 });
 
-// GET /api/v1/resources - Browse with filters, search, and pagination
+// GET /api/resources or /api/v1/resources - Browse with filters, search, sorting, and pagination
 router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 12));
     const skip = (page - 1) * limit;
 
-    const { search, category, status, lat, lng, radiusKm } = req.query;
+    const { search, category, status, availability, location, owner, sortBy, sortOrder, lat, lng, radiusKm } = req.query;
 
     const query: Record<string, any> = {
       moderationStatus: 'approved',
@@ -51,8 +52,28 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response): 
       query.category = category;
     }
 
-    if (status && typeof status === 'string' && status !== 'all') {
-      query.availabilityStatus = status;
+    const targetStatus = status || availability;
+    if (targetStatus && typeof targetStatus === 'string' && targetStatus !== 'all') {
+      query.availabilityStatus = targetStatus;
+    }
+
+    if (location && typeof location === 'string' && location.trim() !== '') {
+      const locRegex = { $regex: location.trim(), $options: 'i' };
+      if (query.$or) {
+        query.$and = [
+          { $or: query.$or },
+          { $or: [{ locationName: locRegex }, { address: locRegex }] },
+        ];
+        delete query.$or;
+      } else {
+        query.$or = [{ locationName: locRegex }, { address: locRegex }];
+      }
+    }
+
+    if (owner && typeof owner === 'string' && owner.trim() !== '') {
+      if (mongoose.isValidObjectId(owner)) {
+        query.providerId = owner;
+      }
     }
 
     // Geolocation radius filter if coordinates provided
@@ -62,7 +83,6 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response): 
       const radKm = parseFloat(radiusKm as string);
 
       if (!isNaN(latitude) && !isNaN(longitude) && !isNaN(radKm)) {
-        // Approx bounding box in degrees (1 deg lat ~ 111km)
         const latDelta = radKm / 111;
         const lngDelta = radKm / (111 * Math.cos((latitude * Math.PI) / 180));
 
@@ -71,11 +91,16 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response): 
       }
     }
 
+    // Sorting
+    const sortField = typeof sortBy === 'string' ? sortBy : 'createdAt';
+    const sortDir = sortOrder === 'asc' ? 1 : -1;
+    const sortQuery: Record<string, any> = { [sortField]: sortDir };
+
     const total = await Resource.countDocuments(query);
     const resources = await Resource.find(query)
       .populate('providerId', 'name email phone role')
       .populate('organizationId', 'name status')
-      .sort({ createdAt: -1 })
+      .sort(sortQuery)
       .skip(skip)
       .limit(limit);
 
@@ -83,7 +108,6 @@ router.get('/', optionalAuth, async (req: AuthenticatedRequest, res: Response): 
     const sanitizedResources = resources.map((r) => {
       const doc = r.toObject();
       if (!req.user) {
-        // Guest user: non-sensitive presentation
         if (doc.providerId && typeof doc.providerId === 'object') {
           (doc.providerId as any).phone = undefined;
           (doc.providerId as any).email = undefined;
@@ -137,6 +161,11 @@ router.get('/mine', authenticate, authorizeRoles('provider', 'organization', 'ad
 // GET /api/v1/resources/:id - Get details of specific resource
 router.get('/:id', optionalAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ success: false, message: 'Invalid resource ID format' });
+      return;
+    }
+
     const resource = await Resource.findById(req.params.id)
       .populate('providerId', 'name email phone role')
       .populate('organizationId', 'name status contactEmail contactPhone address');
@@ -185,7 +214,7 @@ router.post('/', authenticate, authorizeRoles('provider', 'organization', 'admin
       providerId: user._id,
       organizationId: user.organizationId || null,
       quantityReserved: 0,
-      availabilityStatus: 'available',
+      availabilityStatus: data.quantityAvailable === 0 ? 'unavailable' : 'available',
       moderationStatus: 'approved', // Auto-approved for verified providers
     });
 
@@ -224,6 +253,11 @@ router.post('/', authenticate, authorizeRoles('provider', 'organization', 'admin
 // PUT /api/v1/resources/:id - Update resource
 router.put('/:id', authenticate, authorizeRoles('provider', 'organization', 'admin', 'super_admin'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ success: false, message: 'Invalid resource ID format' });
+      return;
+    }
+
     const user = req.user!;
     const resource = await Resource.findById(req.params.id);
 
@@ -255,20 +289,27 @@ router.put('/:id', authenticate, authorizeRoles('provider', 'organization', 'adm
       imageUrl,
     } = req.body;
 
+    if (quantityAvailable !== undefined && (typeof quantityAvailable !== 'number' || quantityAvailable < 0)) {
+      res.status(400).json({ success: false, message: 'Quantity cannot be negative.' });
+      return;
+    }
+
     const prevQty = resource.quantityAvailable;
 
-    if (title) resource.title = title;
-    if (category) resource.category = category;
-    if (description) resource.description = description;
-    if (unit) resource.unit = unit;
-    if (condition) resource.condition = condition;
+    if (title && typeof title === 'string') resource.title = title.trim();
+    if (category && typeof category === 'string') resource.category = category as any;
+    if (description && typeof description === 'string') resource.description = description.trim();
+    if (unit && typeof unit === 'string') resource.unit = unit.trim();
+    if (condition && ['new', 'good', 'perishable'].includes(condition)) resource.condition = condition;
     if (expiryDate !== undefined) resource.expiryDate = expiryDate ? new Date(expiryDate) : undefined;
-    if (locationName) resource.locationName = locationName;
-    if (address) resource.address = address;
-    if (coordinates) resource.coordinates = coordinates;
+    if (locationName && typeof locationName === 'string') resource.locationName = locationName.trim();
+    if (address && typeof address === 'string') resource.address = address.trim();
+    if (coordinates && typeof coordinates.lat === 'number' && typeof coordinates.lng === 'number') {
+      resource.coordinates = coordinates;
+    }
     if (imageUrl !== undefined) resource.imageUrl = imageUrl;
 
-    if (typeof quantityAvailable === 'number' && quantityAvailable >= 0) {
+    if (typeof quantityAvailable === 'number') {
       const diff = quantityAvailable - prevQty;
       resource.quantityAvailable = quantityAvailable;
 
@@ -277,7 +318,7 @@ router.put('/:id', authenticate, authorizeRoles('provider', 'organization', 'adm
         resource.availabilityStatus = 'unavailable';
       } else if (quantityAvailable > 0 && resource.quantityReserved > 0) {
         resource.availabilityStatus = 'partially_available';
-      } else if (quantityAvailable > 0) {
+      } else if (quantityAvailable > 0 && resource.availabilityStatus === 'unavailable') {
         resource.availabilityStatus = 'available';
       }
 
@@ -315,9 +356,136 @@ router.put('/:id', authenticate, authorizeRoles('provider', 'organization', 'adm
   }
 });
 
+// PATCH /api/v1/resources/:id/availability - Update availability status
+router.patch('/:id/availability', authenticate, authorizeRoles('provider', 'organization', 'admin', 'super_admin'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ success: false, message: 'Invalid resource ID format' });
+      return;
+    }
+
+    const { availabilityStatus } = req.body;
+    const validStatuses: AvailabilityStatus[] = ['available', 'partially_available', 'reserved', 'unavailable'];
+    if (!availabilityStatus || !validStatuses.includes(availabilityStatus)) {
+      res.status(400).json({
+        success: false,
+        message: `Invalid availability status. Must be one of [${validStatuses.join(', ')}]`,
+      });
+      return;
+    }
+
+    const resource = await Resource.findById(req.params.id);
+    if (!resource) {
+      res.status(404).json({ success: false, message: 'Resource not found' });
+      return;
+    }
+
+    const user = req.user!;
+    const isOwner = resource.providerId.toString() === user._id.toString();
+    const isAdmin = user.role === 'admin' || user.role === 'super_admin';
+    if (!isOwner && !isAdmin) {
+      res.status(403).json({ success: false, message: 'You are not authorized to update this resource' });
+      return;
+    }
+
+    const previousStatus = resource.availabilityStatus;
+    resource.availabilityStatus = availabilityStatus as AvailabilityStatus;
+    await resource.save();
+
+    await recordAuditLog(req, 'RESOURCE_AVAILABILITY_CHANGED', 'Resource', resource._id.toString(), {
+      previousStatus,
+      newStatus: availabilityStatus,
+    });
+
+    res.json({
+      success: true,
+      message: `Resource availability marked as '${availabilityStatus}'.`,
+      data: resource,
+    });
+  } catch (error) {
+    console.error('Error updating resource availability:', error);
+    res.status(500).json({ success: false, message: 'Failed to update resource availability' });
+  }
+});
+
+// PATCH /api/v1/resources/:id/quantity - Update available quantity
+router.patch('/:id/quantity', authenticate, authorizeRoles('provider', 'organization', 'admin', 'super_admin'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ success: false, message: 'Invalid resource ID format' });
+      return;
+    }
+
+    const { quantityAvailable } = req.body;
+    if (typeof quantityAvailable !== 'number' || quantityAvailable < 0) {
+      res.status(400).json({ success: false, message: 'Quantity must be a non-negative number' });
+      return;
+    }
+
+    const resource = await Resource.findById(req.params.id);
+    if (!resource) {
+      res.status(404).json({ success: false, message: 'Resource not found' });
+      return;
+    }
+
+    const user = req.user!;
+    const isOwner = resource.providerId.toString() === user._id.toString();
+    const isAdmin = user.role === 'admin' || user.role === 'super_admin';
+    if (!isOwner && !isAdmin) {
+      res.status(403).json({ success: false, message: 'You are not authorized to update this resource' });
+      return;
+    }
+
+    const prevQty = resource.quantityAvailable;
+    const diff = quantityAvailable - prevQty;
+    resource.quantityAvailable = quantityAvailable;
+
+    if (quantityAvailable === 0 && resource.quantityReserved === 0) {
+      resource.availabilityStatus = 'unavailable';
+    } else if (quantityAvailable > 0 && resource.quantityReserved > 0) {
+      resource.availabilityStatus = 'partially_available';
+    } else if (quantityAvailable > 0 && resource.availabilityStatus === 'unavailable') {
+      resource.availabilityStatus = 'available';
+    }
+
+    await resource.save();
+
+    if (diff !== 0) {
+      await InventoryTransaction.create({
+        resourceId: resource._id,
+        performedBy: user._id,
+        type: 'stock_adjustment',
+        quantityChanged: diff,
+        previousQuantity: prevQty,
+        newQuantity: quantityAvailable,
+        note: `Direct quantity patch by ${user.name}`,
+      });
+    }
+
+    await recordAuditLog(req, 'RESOURCE_QUANTITY_UPDATED', 'Resource', resource._id.toString(), {
+      previousQuantity: prevQty,
+      newQuantity: quantityAvailable,
+    });
+
+    res.json({
+      success: true,
+      message: 'Quantity updated successfully.',
+      data: resource,
+    });
+  } catch (error) {
+    console.error('Error updating resource quantity:', error);
+    res.status(500).json({ success: false, message: 'Failed to update resource quantity' });
+  }
+});
+
 // DELETE /api/v1/resources/:id - Delete resource
 router.delete('/:id', authenticate, authorizeRoles('provider', 'organization', 'admin', 'super_admin'), async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      res.status(400).json({ success: false, message: 'Invalid resource ID format' });
+      return;
+    }
+
     const user = req.user!;
     const resource = await Resource.findById(req.params.id);
 

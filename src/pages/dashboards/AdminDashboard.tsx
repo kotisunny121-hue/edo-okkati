@@ -38,6 +38,10 @@ export const AdminDashboard: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [verifyOrgModal, setVerifyOrgModal] = useState<{ id: string; name: string; status: 'verified' | 'rejected' } | null>(null);
+  const [verifyNotes, setVerifyNotes] = useState<string>('Verified by regional administration');
+  const [verifying, setVerifying] = useState<boolean>(false);
 
   const fetchAdminData = async () => {
     try {
@@ -55,8 +59,9 @@ export const AdminDashboard: React.FC = () => {
       if (auditRes.success) setAuditLogs(auditRes.data);
 
       fetchUsers();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load admin data:', err);
+      setActionError(err.message || 'Failed to load admin dashboard data');
     } finally {
       setLoading(false);
     }
@@ -67,7 +72,7 @@ export const AdminDashboard: React.FC = () => {
       const query = userSearch ? `?search=${encodeURIComponent(userSearch)}` : '';
       const res = await api.get<{ success: boolean; data: User[] }>(`/admin/users${query}`);
       if (res.success) setUsers(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching users:', err);
     }
   };
@@ -79,34 +84,43 @@ export const AdminDashboard: React.FC = () => {
   const handleToggleUserStatus = async (userId: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'active' ? 'suspended' : 'active';
     try {
+      setActionError(null);
       await api.patch(`/admin/users/${userId}/status`, { status: nextStatus });
       setActionSuccess(`User status updated to ${nextStatus}.`);
       fetchUsers();
     } catch (err: any) {
-      alert(err.message || 'Failed to update user status');
+      setActionError(err.message || 'Failed to update user status');
     }
   };
 
-  const handleVerifyOrg = async (orgId: string, status: 'verified' | 'rejected') => {
-    const notes = window.prompt(`Verification notes for ${status}:`, 'Verified by regional administration');
-    if (notes === null) return;
+  const handleConfirmVerifyOrg = async () => {
+    if (!verifyOrgModal) return;
 
     try {
-      await api.patch(`/admin/organizations/${orgId}/verify`, { status, notes });
-      setActionSuccess(`Organization marked as ${status}.`);
+      setVerifying(true);
+      setActionError(null);
+      await api.patch(`/admin/organizations/${verifyOrgModal.id}/verify`, {
+        status: verifyOrgModal.status,
+        notes: verifyNotes.trim() || 'Reviewed by regional administration',
+      });
+      setActionSuccess(`Organization "${verifyOrgModal.name}" marked as ${verifyOrgModal.status}.`);
+      setVerifyOrgModal(null);
       fetchAdminData();
     } catch (err: any) {
-      alert(err.message || 'Failed to verify organization');
+      setActionError(err.message || 'Failed to verify organization');
+    } finally {
+      setVerifying(false);
     }
   };
 
   const handleModerateResource = async (resourceId: string, status: 'approved' | 'rejected' | 'suspended') => {
     try {
+      setActionError(null);
       await api.patch(`/admin/moderation/resources/${resourceId}`, { status });
       setActionSuccess(`Resource marked as ${status}.`);
       fetchAdminData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update resource moderation');
+      setActionError(err.message || 'Failed to update resource moderation');
     }
   };
 
@@ -132,32 +146,49 @@ export const AdminDashboard: React.FC = () => {
       {actionSuccess && (
         <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-800 flex items-center justify-between">
           <span>{actionSuccess}</span>
-          <button onClick={() => setActionSuccess(null)} className="text-slate-400">✕</button>
+          <button onClick={() => setActionSuccess(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="mb-6 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-800 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
       )}
 
       {/* KPI Overview */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-medium text-slate-500 block">Total Registered Users</span>
-            <span className="text-2xl font-black text-slate-900">{stats.summary.totalUsers}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">Multi-role accounts</span>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">Total Users</span>
+            <span className="text-xl font-black text-slate-900">{stats.summary.totalUsers}</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">Multi-role</span>
           </div>
-          <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-medium text-slate-500 block">Total Resource Listings</span>
-            <span className="text-2xl font-black text-emerald-700">{stats.summary.totalResources}</span>
-            <span className="text-[10px] text-emerald-600 block mt-0.5">Active disaster supplies</span>
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">Total Listings</span>
+            <span className="text-xl font-black text-slate-900">{stats.summary.totalResources}</span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">All depots</span>
           </div>
-          <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-medium text-slate-500 block">Emergency Requests</span>
-            <span className="text-2xl font-black text-blue-700">{stats.summary.totalRequests}</span>
-            <span className="text-[10px] text-blue-600 block mt-0.5">{stats.summary.pendingRequests} pending review</span>
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">Available Stock</span>
+            <span className="text-xl font-black text-emerald-700">{stats.summary.availableResources}</span>
+            <span className="text-[10px] text-emerald-600 block mt-0.5">Ready to request</span>
           </div>
-          <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-xs">
-            <span className="text-[11px] font-medium text-slate-500 block">NGO Verification Queue</span>
-            <span className="text-2xl font-black text-amber-700">{orgQueue.length}</span>
-            <span className="text-[10px] text-amber-600 block mt-0.5">Pending approval</span>
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">Unavailable</span>
+            <span className="text-xl font-black text-rose-700">{stats.summary.unavailableResources}</span>
+            <span className="text-[10px] text-rose-600 block mt-0.5">Reserved / Depleted</span>
+          </div>
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">Total Units</span>
+            <span className="text-xl font-black text-orange-600">{stats.summary.totalAvailableQuantity}</span>
+            <span className="text-[10px] text-orange-600 block mt-0.5">In disaster reserve</span>
+          </div>
+          <div className="bg-white p-3.5 rounded-lg border border-slate-200 shadow-xs">
+            <span className="text-[10px] font-medium text-slate-500 block uppercase font-mono">NGO Queue</span>
+            <span className="text-xl font-black text-amber-700">{orgQueue.length}</span>
+            <span className="text-[10px] text-amber-600 block mt-0.5">Pending review</span>
           </div>
         </div>
       )}
@@ -249,6 +280,51 @@ export const AdminDashboard: React.FC = () => {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Resources Grouped by Location */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-xs">
+            <h3 className="text-sm font-bold text-slate-900 mb-3">Resources Grouped by Staging Location</h3>
+            <div className="space-y-2.5 text-xs">
+              {stats.locationStats && stats.locationStats.length > 0 ? (
+                stats.locationStats.map((loc, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2 rounded bg-slate-50 border border-slate-100">
+                    <span className="font-semibold text-slate-800 truncate max-w-[200px]" title={loc._id}>
+                      {loc._id || 'Primary Depot'}
+                    </span>
+                    <div className="flex items-center gap-3 text-right">
+                      <span className="text-slate-500 font-mono text-[11px]">{loc.count} listings</span>
+                      <span className="font-bold text-emerald-700 font-mono text-[11px]">{loc.totalQty} units</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-slate-400 text-xs">No location distributions recorded.</p>
+              )}
+            </div>
+          </div>
+
+          {/* Recently Added or Updated Resources */}
+          <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-xs">
+            <h3 className="text-sm font-bold text-slate-900 mb-3">Recently Added / Updated Supplies</h3>
+            <div className="divide-y divide-slate-100 text-xs">
+              {stats.recentResources && stats.recentResources.length > 0 ? (
+                stats.recentResources.map((res) => (
+                  <div key={res._id} className="py-2.5 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-bold text-slate-900 block truncate max-w-[220px]">{res.title}</span>
+                      <span className="text-[10px] text-slate-400 capitalize">{res.category.replace('_', ' ')} · {res.locationName}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-bold text-slate-900 block">{res.quantityAvailable} {res.unit}</span>
+                      <StatusBadge status={res.availabilityStatus} className="text-[9px]" />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-slate-400 text-xs">No recent resources.</p>
+              )}
             </div>
           </div>
         </div>
@@ -358,13 +434,19 @@ export const AdminDashboard: React.FC = () => {
                       <td className="py-3 px-4 text-slate-600 truncate max-w-[200px]">{org.address}</td>
                       <td className="py-3 px-4 text-right space-x-2">
                         <button
-                          onClick={() => handleVerifyOrg(org._id, 'verified')}
-                          className="px-2.5 py-1 bg-emerald-600 text-white rounded text-[11px] font-semibold"
+                          onClick={() => {
+                            setVerifyOrgModal({ id: org._id, name: org.name, status: 'verified' });
+                            setVerifyNotes('Verified by regional administration');
+                          }}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-semibold"
                         >
                           Approve Verification
                         </button>
                         <button
-                          onClick={() => handleVerifyOrg(org._id, 'rejected')}
+                          onClick={() => {
+                            setVerifyOrgModal({ id: org._id, name: org.name, status: 'rejected' });
+                            setVerifyNotes('Registration documentation insufficient or expired');
+                          }}
                           className="px-2.5 py-1 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded text-[11px]"
                         >
                           Decline
@@ -473,6 +555,50 @@ export const AdminDashboard: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {/* MODAL: VERIFY ORGANIZATION */}
+      {verifyOrgModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <h3 className="text-sm font-bold text-slate-900 mb-1">
+              {verifyOrgModal.status === 'verified' ? 'Approve NGO Accreditation' : 'Decline Organization Request'}
+            </h3>
+            <p className="text-slate-500 text-[11px] mb-3">
+              Organization: <strong className="text-slate-900">{verifyOrgModal.name}</strong>
+            </p>
+            <div className="mb-4">
+              <label className="block font-medium text-slate-700 mb-1">Administrative Notes</label>
+              <textarea
+                rows={3}
+                value={verifyNotes}
+                onChange={(e) => setVerifyNotes(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none"
+                placeholder="Enter verification audit notes or reason for decline..."
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setVerifyOrgModal(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={verifying}
+                onClick={handleConfirmVerifyOrg}
+                className={`px-4 py-1.5 text-white font-bold rounded shadow-xs disabled:opacity-50 ${
+                  verifyOrgModal.status === 'verified'
+                    ? 'bg-emerald-600 hover:bg-emerald-500'
+                    : 'bg-rose-600 hover:bg-rose-500'
+                }`}
+              >
+                {verifying ? 'Updating...' : `Confirm ${verifyOrgModal.status === 'verified' ? 'Approval' : 'Decline'}`}
+              </button>
+            </div>
           </div>
         </div>
       )}

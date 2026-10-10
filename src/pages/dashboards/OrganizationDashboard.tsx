@@ -32,6 +32,7 @@ export const OrganizationDashboard: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const fetchOrgData = async () => {
     try {
@@ -44,8 +45,9 @@ export const OrganizationDashboard: React.FC = () => {
       if (res.success) {
         setData(res.data);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching org data:', err);
+      setActionError(err.message || 'Failed to load organization data');
     } finally {
       setLoading(false);
     }
@@ -57,25 +59,27 @@ export const OrganizationDashboard: React.FC = () => {
 
   const handleApprove = async (requestId: string, quantity: number) => {
     try {
+      setActionError(null);
       await api.post(`/requests/${requestId}/approve`, {
         approvedQuantity: quantity,
       });
       setActionSuccess('Request approved and stock reserved.');
       fetchOrgData();
     } catch (err: any) {
-      alert(err.message || 'Failed to approve request');
+      setActionError(err.message || 'Failed to approve request');
     }
   };
 
   const handleFulfill = async (requestId: string) => {
     try {
+      setActionError(null);
       await api.post(`/requests/${requestId}/fulfill`, {
         note: 'Distribution completed by NGO field logistics',
       });
       setActionSuccess('Request marked fulfilled.');
       fetchOrgData();
     } catch (err: any) {
-      alert(err.message || 'Failed to fulfill request');
+      setActionError(err.message || 'Failed to fulfill request');
     }
   };
 
@@ -147,8 +151,16 @@ export const OrganizationDashboard: React.FC = () => {
       </div>
 
       {actionSuccess && (
-        <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-800">
-          {actionSuccess}
+        <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-800 flex items-center justify-between">
+          <span>{actionSuccess}</span>
+          <button onClick={() => setActionSuccess(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="mb-6 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-800 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
       )}
 

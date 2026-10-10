@@ -18,26 +18,49 @@ router.get('/stats', async (_req, res: Response): Promise<void> => {
     const [
       totalUsers,
       totalResources,
+      availableResources,
+      unavailableResources,
       pendingResources,
       totalRequests,
       pendingRequests,
       fulfilledRequests,
       pendingOrgs,
       verifiedOrgs,
+      recentResources,
     ] = await Promise.all([
       User.countDocuments(),
       Resource.countDocuments(),
+      Resource.countDocuments({
+        $or: [{ availabilityStatus: 'available' }, { availabilityStatus: 'partially_available' }],
+      }),
+      Resource.countDocuments({
+        $or: [{ availabilityStatus: 'unavailable' }, { availabilityStatus: 'reserved' }, { quantityAvailable: 0 }],
+      }),
       Resource.countDocuments({ moderationStatus: 'pending' }),
       ResourceRequest.countDocuments(),
       ResourceRequest.countDocuments({ status: 'pending' }),
       ResourceRequest.countDocuments({ status: 'fulfilled' }),
       Organization.countDocuments({ status: 'pending' }),
       Organization.countDocuments({ status: 'verified' }),
+      Resource.find()
+        .populate('providerId', 'name email phone')
+        .sort({ updatedAt: -1 })
+        .limit(6),
     ]);
 
     // Aggregate category distribution
     const categoryStats = await Resource.aggregate([
       { $group: { _id: '$category', count: { $sum: 1 }, totalQty: { $sum: '$quantityAvailable' } } },
+    ]);
+
+    // Calculate total available quantity across all resources
+    const totalAvailableQuantity = categoryStats.reduce((sum, c) => sum + (c.totalQty || 0), 0);
+
+    // Aggregate resources grouped by location
+    const locationStats = await Resource.aggregate([
+      { $group: { _id: '$locationName', count: { $sum: 1 }, totalQty: { $sum: '$quantityAvailable' } } },
+      { $sort: { count: -1 } },
+      { $limit: 8 },
     ]);
 
     // Aggregate request status distribution
@@ -56,6 +79,9 @@ router.get('/stats', async (_req, res: Response): Promise<void> => {
         summary: {
           totalUsers,
           totalResources,
+          availableResources,
+          unavailableResources,
+          totalAvailableQuantity,
           pendingResources,
           totalRequests,
           pendingRequests,
@@ -64,8 +90,10 @@ router.get('/stats', async (_req, res: Response): Promise<void> => {
           verifiedOrgs,
         },
         categoryStats,
+        locationStats,
         requestStatusStats,
         userRoleStats,
+        recentResources,
       },
     });
   } catch (err) {

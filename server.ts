@@ -57,16 +57,18 @@ const authLimiter = rateLimit({
 });
 
 // Health check endpoint (Liveness & Readiness)
-app.get('/api/v1/health', (_req: Request, res: Response) => {
+const healthHandler = (_req: Request, res: Response) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
   });
-});
+};
+app.get('/api/health', healthHandler);
+app.get('/api/v1/health', healthHandler);
 
-// Mount versioned REST API routes
+// Mount versioned REST API routes under both /api and /api/v1 for standard compatibility
 app.use('/api/v1/auth', authLimiter, authRouter);
 app.use('/api/v1/resources', resourceRouter);
 app.use('/api/v1/requests', requestRouter);
@@ -75,6 +77,15 @@ app.use('/api/v1/volunteers', volunteerRouter);
 app.use('/api/v1/notifications', notificationRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/super-admin', superAdminRouter);
+
+app.use('/api/auth', authLimiter, authRouter);
+app.use('/api/resources', resourceRouter);
+app.use('/api/requests', requestRouter);
+app.use('/api/organizations', orgRouter);
+app.use('/api/volunteers', volunteerRouter);
+app.use('/api/notifications', notificationRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/super-admin', superAdminRouter);
 
 // Centralized error handling
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

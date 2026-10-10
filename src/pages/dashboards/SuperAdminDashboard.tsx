@@ -19,6 +19,10 @@ export const SuperAdminDashboard: React.FC = () => {
   const [health, setHealth] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [roleModalUser, setRoleModalUser] = useState<{ id: string; name: string; currentRole: UserRole } | null>(null);
+  const [selectedRole, setSelectedRole] = useState<UserRole>('admin');
+  const [updatingRole, setUpdatingRole] = useState<boolean>(false);
 
   const fetchSuperData = async () => {
     try {
@@ -32,8 +36,9 @@ export const SuperAdminDashboard: React.FC = () => {
       if (adminsRes.success) setAdmins(adminsRes.data);
       if (logsRes.success) setPrivilegedLogs(logsRes.data);
       if (healthRes) setHealth(healthRes);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load super admin data:', err);
+      setActionError(err.message || 'Failed to load super admin data');
     } finally {
       setLoading(false);
     }
@@ -43,19 +48,20 @@ export const SuperAdminDashboard: React.FC = () => {
     fetchSuperData();
   }, []);
 
-  const handleChangeRole = async (userId: string, currentRole: string) => {
-    const newRole = window.prompt(
-      `Enter new role for user (seeker, provider, organization, volunteer, admin, super_admin):`,
-      currentRole
-    );
-    if (!newRole || newRole === currentRole) return;
+  const handleConfirmRoleChange = async () => {
+    if (!roleModalUser) return;
 
     try {
-      await api.patch(`/super-admin/users/${userId}/role`, { role: newRole });
-      setActionSuccess(`Role successfully updated to ${newRole}.`);
+      setUpdatingRole(true);
+      setActionError(null);
+      await api.patch(`/super-admin/users/${roleModalUser.id}/role`, { role: selectedRole });
+      setActionSuccess(`Role for "${roleModalUser.name}" successfully updated to ${selectedRole}.`);
+      setRoleModalUser(null);
       fetchSuperData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update user role');
+      setActionError(err.message || 'Failed to update user role');
+    } finally {
+      setUpdatingRole(false);
     }
   };
 
@@ -92,7 +98,14 @@ export const SuperAdminDashboard: React.FC = () => {
       {actionSuccess && (
         <div className="mb-6 p-3 bg-emerald-950/70 border border-emerald-800 text-emerald-200 rounded text-xs flex items-center justify-between">
           <span>{actionSuccess}</span>
-          <button onClick={() => setActionSuccess(null)} className="text-slate-400">✕</button>
+          <button onClick={() => setActionSuccess(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="mb-6 p-3 bg-rose-950/70 border border-rose-800 text-rose-200 rounded text-xs flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-slate-400 hover:text-slate-200">✕</button>
         </div>
       )}
 
@@ -134,7 +147,14 @@ export const SuperAdminDashboard: React.FC = () => {
                   </td>
                   <td className="py-3 px-4 text-right">
                     <button
-                      onClick={() => handleChangeRole(adm.id || (adm as any)._id, adm.role)}
+                      onClick={() => {
+                        setRoleModalUser({
+                          id: adm.id || (adm as any)._id,
+                          name: adm.name,
+                          currentRole: adm.role,
+                        });
+                        setSelectedRole(adm.role);
+                      }}
                       className="px-2.5 py-1 rounded text-[11px] font-semibold bg-purple-900/40 hover:bg-purple-900/70 text-purple-200 border border-purple-700 transition-colors"
                     >
                       Change Role
@@ -194,6 +214,52 @@ export const SuperAdminDashboard: React.FC = () => {
           </table>
         </div>
       </div>
+      {/* MODAL: CHANGE ROLE */}
+      {roleModalUser && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-lg shadow-2xl border border-slate-700 max-w-md w-full p-6 text-xs text-slate-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-2 mb-3 text-purple-400">
+              <Key className="w-5 h-5" />
+              <h3 className="text-sm font-bold text-white">Modify User Access Role</h3>
+            </div>
+            <p className="text-slate-400 mb-4">
+              Updating authorization permissions for <strong className="text-white">{roleModalUser.name}</strong>.
+            </p>
+            <div className="mb-4">
+              <label className="block font-medium text-slate-300 mb-1.5">Select System Role</label>
+              <select
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value as UserRole)}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-slate-200 focus:outline-none focus:border-purple-500"
+              >
+                <option value="seeker">Resource Seeker (Public Citizen)</option>
+                <option value="provider">Relief Provider (Stockpile Owner)</option>
+                <option value="organization">NGO / Agency Organization</option>
+                <option value="volunteer">Volunteer Logistics Coordinator</option>
+                <option value="admin">System Administrator</option>
+                <option value="super_admin">Super Administrator (Security Root)</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRoleModalUser(null)}
+                className="px-3 py-1.5 border border-slate-700 rounded text-slate-300 hover:bg-slate-700/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={updatingRole}
+                onClick={handleConfirmRoleChange}
+                className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {updatingRole ? 'Updating...' : 'Assign New Role'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

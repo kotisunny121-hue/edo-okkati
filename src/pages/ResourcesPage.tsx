@@ -33,12 +33,17 @@ export const ResourcesPage: React.FC = () => {
   const currentCategory = searchParams.get('category') || 'all';
   const currentStatus = searchParams.get('status') || 'all';
   const currentSearch = searchParams.get('search') || '';
+  const currentLocation = searchParams.get('location') || '';
+  const currentSortBy = searchParams.get('sortBy') || 'createdAt';
+  const currentSortOrder = searchParams.get('sortOrder') || 'desc';
 
   const [searchInput, setSearchInput] = useState<string>(currentSearch);
+  const [locationInput, setLocationInput] = useState<string>(currentLocation);
 
   useEffect(() => {
     setSearchInput(currentSearch);
-  }, [currentSearch]);
+    setLocationInput(currentLocation);
+  }, [currentSearch, currentLocation]);
 
   const fetchResources = async () => {
     try {
@@ -50,6 +55,9 @@ export const ResourcesPage: React.FC = () => {
       if (currentSearch) params.set('search', currentSearch);
       if (currentCategory && currentCategory !== 'all') params.set('category', currentCategory);
       if (currentStatus && currentStatus !== 'all') params.set('status', currentStatus);
+      if (currentLocation) params.set('location', currentLocation);
+      if (currentSortBy) params.set('sortBy', currentSortBy);
+      if (currentSortOrder) params.set('sortOrder', currentSortOrder);
 
       const res = await api.get<{
         success: boolean;
@@ -71,7 +79,7 @@ export const ResourcesPage: React.FC = () => {
 
   useEffect(() => {
     fetchResources();
-  }, [currentPage, currentCategory, currentStatus, currentSearch]);
+  }, [currentPage, currentCategory, currentStatus, currentSearch, currentLocation, currentSortBy, currentSortOrder]);
 
   const updateParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -86,11 +94,20 @@ export const ResourcesPage: React.FC = () => {
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    updateParam('search', searchInput.trim());
+    const next = new URLSearchParams(searchParams);
+    if (searchInput.trim()) next.set('search', searchInput.trim());
+    else next.delete('search');
+
+    if (locationInput.trim()) next.set('location', locationInput.trim());
+    else next.delete('location');
+
+    next.set('page', '1');
+    setSearchParams(next);
   };
 
   const clearFilters = () => {
     setSearchInput('');
+    setLocationInput('');
     setSearchParams(new URLSearchParams());
   };
 
@@ -159,35 +176,48 @@ export const ResourcesPage: React.FC = () => {
 
       {/* Filter and Search Bar */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 shadow-xs mb-6 space-y-4">
-        {/* Search Input */}
-        <form onSubmit={handleSearchSubmit} className="flex gap-2">
-          <div className="relative flex-1">
+        {/* Search & Location Inputs */}
+        <form onSubmit={handleSearchSubmit} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div className="relative md:col-span-5">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Search by supply name, keyword, city, or depot..."
+              placeholder="Search by supply title or keyword..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
             />
           </div>
-          <button
-            type="submit"
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded shadow-xs"
-          >
-            Filter
-          </button>
-          {(currentSearch || currentCategory !== 'all' || currentStatus !== 'all') && (
+
+          <div className="relative md:col-span-4">
+            <input
+              type="text"
+              placeholder="Filter by city, area, depot..."
+              value={locationInput}
+              onChange={(e) => setLocationInput(e.target.value)}
+              className="w-full px-3 py-2 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-orange-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 md:col-span-3">
             <button
-              type="button"
-              onClick={clearFilters}
-              className="px-3 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-medium rounded flex items-center gap-1"
-              title="Reset Filters"
+              type="submit"
+              className="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded shadow-xs"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Reset
+              Filter
             </button>
-          )}
+            {(currentSearch || currentLocation || currentCategory !== 'all' || currentStatus !== 'all') && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-3 py-2 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-medium rounded flex items-center gap-1 shrink-0"
+                title="Reset Filters"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset
+              </button>
+            )}
+          </div>
         </form>
 
         {/* Category Pills/Buttons (Segmented controls) */}
@@ -207,30 +237,54 @@ export const ResourcesPage: React.FC = () => {
           ))}
         </div>
 
-        {/* Secondary filters (Availability) */}
-        <div className="flex items-center gap-4 pt-2 border-t border-slate-100 text-xs">
-          <span className="font-semibold text-slate-500 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5" /> Stock Filter:
-          </span>
+        {/* Secondary filters (Availability & Sorting) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-slate-500 flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5" /> Stock Filter:
+            </span>
+            <div className="flex items-center gap-1.5">
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'available', label: 'In Stock' },
+                { id: 'partially_available', label: 'Partial' },
+                { id: 'reserved', label: 'Reserved' },
+              ].map((st) => (
+                <button
+                  key={st.id}
+                  onClick={() => updateParam('status', st.id)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium ${
+                    currentStatus === st.id
+                      ? 'bg-slate-800 text-white'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
-            {[
-              { id: 'all', label: 'All Statuses' },
-              { id: 'available', label: 'In Stock' },
-              { id: 'partially_available', label: 'Partial Stock' },
-              { id: 'reserved', label: 'Fully Reserved' },
-            ].map((st) => (
-              <button
-                key={st.id}
-                onClick={() => updateParam('status', st.id)}
-                className={`px-2.5 py-1 rounded text-xs font-medium ${
-                  currentStatus === st.id
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                {st.label}
-              </button>
-            ))}
+            <span className="font-semibold text-slate-500">Sort by:</span>
+            <select
+              value={`${currentSortBy}:${currentSortOrder}`}
+              onChange={(e) => {
+                const [sb, so] = e.target.value.split(':');
+                const next = new URLSearchParams(searchParams);
+                next.set('sortBy', sb);
+                next.set('sortOrder', so);
+                next.set('page', '1');
+                setSearchParams(next);
+              }}
+              className="px-2 py-1 bg-white border border-slate-200 rounded text-xs text-slate-700 focus:outline-none"
+            >
+              <option value="createdAt:desc">Newest First</option>
+              <option value="createdAt:asc">Oldest First</option>
+              <option value="quantityAvailable:desc">Highest Stock Available</option>
+              <option value="quantityAvailable:asc">Lowest Stock Available</option>
+              <option value="title:asc">Title A-Z</option>
+            </select>
           </div>
         </div>
       </div>

@@ -17,6 +17,10 @@ export const VolunteerDashboard: React.FC = () => {
   const [assignments, setAssignments] = useState<VolunteerAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [issueModalTaskId, setIssueModalTaskId] = useState<string | null>(null);
+  const [issueReasonInput, setIssueReasonInput] = useState<string>('Destination inaccessible due to floodwaters or blocked road');
+  const [submittingIssue, setSubmittingIssue] = useState<boolean>(false);
 
   const fetchAssignments = async () => {
     try {
@@ -27,8 +31,9 @@ export const VolunteerDashboard: React.FC = () => {
       if (res.success) {
         setAssignments(res.data);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load volunteer tasks:', err);
+      setActionError(err.message || 'Failed to load volunteer tasks');
     } finally {
       setLoading(false);
     }
@@ -40,6 +45,7 @@ export const VolunteerDashboard: React.FC = () => {
 
   const handleUpdateStatus = async (assignmentId: string, status: string, notes?: string) => {
     try {
+      setActionError(null);
       await api.patch(`/volunteers/assignments/${assignmentId}/status`, {
         status,
         notes: notes || `Updated to ${status} by volunteer`,
@@ -47,7 +53,18 @@ export const VolunteerDashboard: React.FC = () => {
       setActionSuccess(`Task status successfully updated to ${status}.`);
       fetchAssignments();
     } catch (err: any) {
-      alert(err.message || 'Failed to update assignment status');
+      setActionError(err.message || 'Failed to update assignment status');
+    }
+  };
+
+  const handleConfirmReportIssue = async () => {
+    if (!issueModalTaskId) return;
+    try {
+      setSubmittingIssue(true);
+      await handleUpdateStatus(issueModalTaskId, 'failed', issueReasonInput.trim() || 'Delivery issue reported');
+      setIssueModalTaskId(null);
+    } finally {
+      setSubmittingIssue(false);
     }
   };
 
@@ -74,7 +91,14 @@ export const VolunteerDashboard: React.FC = () => {
       {actionSuccess && (
         <div className="mb-6 p-3 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-800 flex items-center justify-between">
           <span>{actionSuccess}</span>
-          <button onClick={() => setActionSuccess(null)} className="text-slate-400">✕</button>
+          <button onClick={() => setActionSuccess(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="mb-6 p-3 bg-rose-50 border border-rose-200 rounded text-xs text-rose-800 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-slate-400 hover:text-slate-600">✕</button>
         </div>
       )}
 
@@ -177,10 +201,10 @@ export const VolunteerDashboard: React.FC = () => {
                         </button>
                         <button
                           onClick={() => {
-                            const reason = window.prompt('Report delivery failure reason:');
-                            if (reason) handleUpdateStatus(task._id, 'failed', reason);
+                            setIssueModalTaskId(task._id);
+                            setIssueReasonInput('Destination inaccessible due to floodwaters or road blockage');
                           }}
-                          className="px-3 py-2 border border-rose-300 text-rose-700 hover:bg-rose-50 rounded text-xs"
+                          className="px-3 py-2 border border-rose-300 text-rose-700 hover:bg-rose-50 rounded text-xs font-medium"
                         >
                           Report Issue
                         </button>
@@ -205,6 +229,50 @@ export const VolunteerDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* MODAL: REPORT DELIVERY ISSUE */}
+      {issueModalTaskId && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Report Handover Obstacle</h3>
+                <p className="text-slate-500 text-[11px]">Notify coordinators why supplies could not be handed over.</p>
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="block font-medium text-slate-700 mb-1">Issue Details / Explanation</label>
+              <textarea
+                rows={3}
+                value={issueReasonInput}
+                onChange={(e) => setIssueReasonInput(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded focus:ring-1 focus:ring-rose-500 focus:outline-none"
+                placeholder="E.g. Recipient unreachable, route flooded, safety hazard..."
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIssueModalTaskId(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submittingIssue}
+                onClick={handleConfirmReportIssue}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {submittingIssue ? 'Submitting...' : 'Mark Unsuccessful & Alert Dispatch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

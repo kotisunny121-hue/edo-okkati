@@ -213,3 +213,121 @@ describe('3. Request Workflow Transitions', () => {
     expect(request.statusHistory[0].status).toBe('pending');
   });
 });
+
+describe('4. Full Resource CRUD & Availability Operations', () => {
+  it('updates resource details and verifies persistence in MongoDB', async () => {
+    const provider = await User.create({
+      name: 'Resource Provider 4',
+      email: 'provider4@relief.gov',
+      passwordHash: 'dummy',
+      role: 'provider',
+    });
+
+    const resource = await Resource.create({
+      title: 'Pediatric Antibiotics Pack',
+      category: 'medicine',
+      description: 'Oral antibiotics suspension bottles',
+      quantityAvailable: 50,
+      quantityReserved: 0,
+      unit: 'bottles',
+      providerId: provider._id,
+      locationName: 'Clinic Hub',
+      address: '77 Medical Ave',
+      coordinates: { lat: 37.78, lng: -122.42 },
+      availabilityStatus: 'available',
+    });
+
+    // Update resource details
+    resource.title = 'Updated Pediatric Antibiotics 250mg';
+    resource.quantityAvailable = 45;
+    resource.locationName = 'Main Clinic Depot';
+    await resource.save();
+
+    const fetched = await Resource.findById(resource._id);
+    expect(fetched?.title).toBe('Updated Pediatric Antibiotics 250mg');
+    expect(fetched?.quantityAvailable).toBe(45);
+    expect(fetched?.locationName).toBe('Main Clinic Depot');
+  });
+
+  it('updates availability status directly without altering physical quantity', async () => {
+    const provider = await User.create({
+      name: 'Resource Provider 5',
+      email: 'provider5@relief.gov',
+      passwordHash: 'dummy',
+      role: 'provider',
+    });
+
+    const resource = await Resource.create({
+      title: 'Rescue Life Jackets',
+      category: 'rescue',
+      description: 'Coast Guard approved flotation vests',
+      quantityAvailable: 25,
+      quantityReserved: 0,
+      unit: 'vests',
+      providerId: provider._id,
+      locationName: 'Harbor Depot',
+      address: '1 Marina Way',
+      coordinates: { lat: 37.8, lng: -122.43 },
+      availabilityStatus: 'available',
+    });
+
+    resource.availabilityStatus = 'partially_available';
+    await resource.save();
+
+    const updated = await Resource.findById(resource._id);
+    expect(updated?.availabilityStatus).toBe('partially_available');
+    expect(updated?.quantityAvailable).toBe(25);
+  });
+
+  it('prevents saving negative available quantities', async () => {
+    const provider = await User.create({
+      name: 'Resource Provider 6',
+      email: 'provider6@relief.gov',
+      passwordHash: 'dummy',
+      role: 'provider',
+    });
+
+    await expect(
+      Resource.create({
+        title: 'Invalid Stock Item',
+        category: 'other',
+        description: 'Negative stock test item',
+        quantityAvailable: -10,
+        quantityReserved: 0,
+        unit: 'units',
+        providerId: provider._id,
+        locationName: 'Depot Test',
+        address: '100 Test St',
+        coordinates: { lat: 37.7, lng: -122.4 },
+      })
+    ).rejects.toThrow();
+  });
+
+  it('deletes resource from MongoDB and confirms deletion', async () => {
+    const provider = await User.create({
+      name: 'Resource Provider 7',
+      email: 'provider7@relief.gov',
+      passwordHash: 'dummy',
+      role: 'provider',
+    });
+
+    const resource = await Resource.create({
+      title: 'Temporary Cot Beds',
+      category: 'shelter',
+      description: 'Foldable steel cots',
+      quantityAvailable: 15,
+      quantityReserved: 0,
+      unit: 'cots',
+      providerId: provider._id,
+      locationName: 'Warehouse 9',
+      address: '900 Logistics Blvd',
+      coordinates: { lat: 37.75, lng: -122.39 },
+    });
+
+    const id = resource._id;
+    await Resource.findByIdAndDelete(id);
+
+    const deleted = await Resource.findById(id);
+    expect(deleted).toBeNull();
+  });
+});

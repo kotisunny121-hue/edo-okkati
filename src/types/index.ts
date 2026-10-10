@@ -201,6 +201,9 @@ export interface AdminStats {
   summary: {
     totalUsers: number;
     totalResources: number;
+    availableResources: number;
+    unavailableResources: number;
+    totalAvailableQuantity: number;
     pendingResources: number;
     totalRequests: number;
     pendingRequests: number;
@@ -209,6 +212,8 @@ export interface AdminStats {
     verifiedOrgs: number;
   };
   categoryStats: Array<{ _id: string; count: number; totalQty: number }>;
+  locationStats: Array<{ _id: string; count: number; totalQty: number }>;
   requestStatusStats: Array<{ _id: string; count: number }>;
   userRoleStats: Array<{ _id: string; count: number }>;
+  recentResources: Resource[];
 }

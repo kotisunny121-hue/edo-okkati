@@ -21,6 +21,8 @@ export const SeekerDashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [cancelModalReq, setCancelModalReq] = useState<ResourceRequest | null>(null);
+  const [cancelling, setCancelling] = useState<boolean>(false);
 
   const fetchMyRequests = async () => {
     try {
@@ -40,20 +42,21 @@ export const SeekerDashboard: React.FC = () => {
     fetchMyRequests();
   }, []);
 
-  const handleCancelRequest = async (requestId: string) => {
-    if (!window.confirm('Are you sure you want to cancel this emergency request? Any reserved items will be released back to the community.')) {
-      return;
-    }
-
+  const handleConfirmCancelRequest = async () => {
+    if (!cancelModalReq) return;
     try {
+      setCancelling(true);
       setActionError(null);
-      await api.post(`/requests/${requestId}/cancel`, {
+      await api.post(`/requests/${cancelModalReq._id}/cancel`, {
         reason: 'Cancelled by seeker',
       });
-      setActionSuccess('Request cancelled. Reserved stock released.');
+      setActionSuccess('Request cancelled. Any reserved stock has been released.');
+      setCancelModalReq(null);
       fetchMyRequests();
     } catch (err: any) {
       setActionError(err.message || 'Failed to cancel request');
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -210,7 +213,7 @@ export const SeekerDashboard: React.FC = () => {
                       <td className="py-3 px-4 text-right">
                         {(req.status === 'pending' || req.status === 'approved') && (
                           <button
-                            onClick={() => handleCancelRequest(req._id)}
+                            onClick={() => setCancelModalReq(req)}
                             className="px-2.5 py-1 text-rose-700 hover:text-rose-800 border border-rose-200 hover:bg-rose-50 rounded text-[11px] font-semibold transition-colors"
                           >
                             Cancel Request
@@ -247,6 +250,35 @@ export const SeekerDashboard: React.FC = () => {
           When your request changes to <strong>Approved</strong>, supplies have been reserved specifically for your location. The staging depot manager or an assigned volunteer coordinator will reach out to your contact phone to coordinate collection or handover. For immediate life-safety emergencies, call 911 immediately.
         </p>
       </div>
+
+      {/* CANCEL REQUEST CONFIRMATION MODAL */}
+      {cancelModalReq && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-xs animate-in fade-in zoom-in-95">
+            <h3 className="text-sm font-bold text-slate-900 mb-2">Cancel Emergency Request</h3>
+            <p className="text-slate-600 mb-4 bg-slate-50 p-3 rounded border border-slate-200">
+              Are you sure you want to cancel this request? Any reserved items will be immediately released back into the relief network for other seekers in need.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCancelModalReq(null)}
+                className="px-3 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50"
+              >
+                Keep Request
+              </button>
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={handleConfirmCancelRequest}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded shadow-xs disabled:opacity-50"
+              >
+                {cancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
